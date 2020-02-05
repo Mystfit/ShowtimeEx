@@ -1,0 +1,6 @@
+%{
+  "eflatbuffers": {:git, "https://github.com/mystfit/eflatbuffers", "fc75bfbc3a7a78a4149743d0257b79830e79a050", [branch: "comments"]},
+  "event_bus": {:hex, :event_bus, "1.6.1", "07331328b67ccc76d14a12872013464106390abaa47ea0d6a7755e3524899964", [:mix], [], "hexpm"},
+  "uuid": {:hex, :uuid, "1.1.8", "e22fc04499de0de3ed1116b770c7737779f226ceefa0badb3592e64d5cfb4eb9", [:mix], [], "hexpm"},
+  "websockex": {:hex, :websockex, "0.4.2", "9a3b7dc25655517ecd3f8ff7109a77fce94956096b942836cdcfbc7c86603ecc", [:mix], [], "hexpm"},
+}

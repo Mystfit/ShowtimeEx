@@ -1,0 +1,3 @@
+[submodule "priv/schemas"]
+	path = priv/schemas
+	url = https://github.com/mystfit/showtime-schemas.git
