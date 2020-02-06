@@ -1,6 +1,5 @@
-defmodule ShowtimeEx.BridgeSocket do
+defmodule ShowtimeEx.StageSocket do
   use WebSockex
-  alias EventBus.Model.Event
 
   def start_link(url) do
     WebSockex.start_link(url, __MODULE__, %{})
@@ -11,7 +10,7 @@ defmodule ShowtimeEx.BridgeSocket do
   end
 
   def handle_frame({:binary, msg}, state) do
-    ShowtimeEx.Bridge.recv(msg)
+    ShowtimeEx.Bridge.sock_receive(msg)
     {:ok, state}
   end
 

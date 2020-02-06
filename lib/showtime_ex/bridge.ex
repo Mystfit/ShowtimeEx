@@ -1,16 +1,17 @@
 defmodule ShowtimeEx.Bridge do
-  use GenServer
+  @hb_DURATION 1000
 
-  def init(state) do
-    {:ok, schema_pid} =
-      ShowtimeEx.MessageSchema.start_link(
-        Application.fetch_env!(:showtime_ex, :stage_schema_files)
-      )
+  use GenServer
+  require Logger
+  alias ShowtimeEx.Message, as: Message
+
+  def init(_state) do
+    Process.send_after(self(), :load_schemas, 0)
 
     {:ok,
      %{
-       schema: schema_pid,
-       socket: nil
+       stage_socket: nil,
+       schema: nil
      }}
   end
 
@@ -19,85 +20,109 @@ defmodule ShowtimeEx.Bridge do
   end
 
   def join(address, name) do
-    GenServer.cast(__MODULE__, {"ClientJoinRequest", %{name: name, address: address}})
+    GenServer.cast(__MODULE__, {:ClientJoinRequest, %{address: address, name: name}})
   end
 
-  def leave(performer, reason = "QUIT") do
-    GenServer.cast(__MODULE__, {"ClientLeaveRequest", %{performer: performer, reason: reason}})
+  def leave(performer_path, reason = "QUIT") do
+    GenServer.cast(
+      __MODULE__,
+      {:ClientLeaveRequest, %{performer_path: performer_path, reason: reason}}
+    )
   end
 
-  def recv(msg) do
-    GenServer.cast(__MODULE__, {"recv", msg})
+  def add(entity) do
+    GenServer.cast(__MODULE__, {:EntityCreateRequest, %{entity: entity}})
+  end
+
+  def remove(entity_path) do
+    GenServer.cast(__MODULE__, {:EntityDestroyRequest, %{entity_path: entity_path}})
+  end
+
+  def sock_receive(msg) do
+    GenServer.cast(__MODULE__, {:sock_receive, msg})
   end
 
   # ----------------------------
-  def handle_cast({"recv", msg}, state) do
-    Eflatbuffers.read(msg, ShowtimeEx.MessageSchema.schema())
-    |> IO.inspect()
+
+  def handle_info(:load_schemas, state) do
+    {:ok, schema} =
+      Application.fetch_env!(:showtime_ex, :stage_schema_files)
+      |> Message.load_schema()
+
+    {:noreply, Map.put(state, :schema, schema)}
+  end
+
+  def handle_info({:heartbeat}, state) do
+    {:ok, result} =
+      encode({:SignalMessage, :CLIENT_HEARTBEAT}, state[:schema])
+      |> sock_send(state[:stage_socket])
+
+    send_heartbeat(@hb_DURATION)
     {:noreply, state}
   end
 
-  def handle_cast({"ClientJoinRequest", %{address: address, name: name}}, state) do
+  def handle_cast({:sock_receive, msg}, state) do
+    Eflatbuffers.read!(msg, state[:schema])
+    |> IO.inspect()
+
+    {:noreply, state}
+  end
+
+  def handle_cast({:ClientJoinRequest, %{address: address, name: name}} = request, state) do
     state = ensure_socket_connected(address, state)
 
-    msg = %{
-      content_type: "ClientJoinRequest",
-      content: %{
-        performer: %{
-          entity: %{
-            URI: name
-          }
-        }
-      }
-    }
+    {:ok, result} =
+      encode(request, state[:schema])
+      |> sock_send(state[:stage_socket])
 
-    send(state[:socket], msg, state[:schema])
     {:noreply, state}
   end
 
-  def handle_cast({"ClientLeaveRequest", %{performer: performer, reason: reason}}, state) do
-    msg = %{
-      content_type: "ClientLeaveRequest",
-      content: %{
-        performer_URI: performer,
-        reason: reason
-      }
-    }
+  def handle_cast({content_type, content} = request, state) do
+    {:ok, result} =
+      encode(request, state[:schema])
+      |> sock_send(state[:stage_socket])
 
-    send(state[:socket], msg, state[:schema])
     {:noreply, state}
   end
 
-  def handle_info(:heartbeat, state) do
-    msg = %{
-      content_type: "SignalMessage",
-      content: %{
-        signal: "CLIENT_HEARTBEAT"
-      }
-    }
-
-    send(state[:socket], msg, state[:schema])
-
-    Process.send_after(self(), :heartbeat, 1000)
-    {:noreply, state}
+  def ensure_socket_connected(address, %{stage_socket: nil} = state) do
+    {:ok, socket_pid} = connect(address)
+    send_heartbeat(@hb_DURATION)
+    Map.put(state, :stage_socket, socket_pid)
   end
 
-  def ensure_socket_connected(address, %{socket: nil} = state) do
-    Map.put(state, :socket, connect(address))
-  end
+  def ensure_socket_connected(_address, state), do: state
 
   def connect(address) do
-    {:ok, socket_pid} = ShowtimeEx.BridgeSocket.start_link(address)
-    Process.send_after(self(), :heartbeat, 1000)
-    socket_pid
+    case ShowtimeEx.StageSocket.start_link(address) do
+      {:ok, socket_pid} ->
+        Logger.info("Connected to #{address}")
+        {:ok, socket_pid}
+
+      {:error, sock_err} ->
+        Logger.error("Could not connect to #{address}")
+        {:error, sock_err}
+    end
   end
 
-  def ensure_socket_connected(address, state), do: state
+  def send_heartbeat(duration) do
+    Process.send_after(self(), {:heartbeat}, duration)
+  end
 
-  def send(socket, content, schema) do
-    WebSockex.send_frame(
-      socket,
-      {:binary, ShowtimeEx.MessageSchema.encode(Map.merge(%{id: 0}, content))}
-    )
+  def encode(request, schema) do
+    Message.format(request)
+    |> Eflatbuffers.write!(schema)
+  end
+
+  def sock_send(msg, socket) do
+    case WebSockex.send_frame(socket, {:binary, msg}) do
+      :ok ->
+        {:ok, :success}
+
+      {:error, sock_err} ->
+        Logger.error("Could not send message: #{sock_err}")
+        {:error, sock_err}
+    end
   end
 end
