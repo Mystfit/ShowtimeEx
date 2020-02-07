@@ -78,7 +78,7 @@ defmodule ShowtimeEx.Bridge do
     {:noreply, state}
   end
 
-  def handle_cast({content_type, content} = request, state) do
+  def handle_cast({content_type, content} = request, state) when is_atom(content_type) do
     {:ok, result} =
       encode(request, state[:schema])
       |> sock_send(state[:stage_socket])
@@ -110,8 +110,9 @@ defmodule ShowtimeEx.Bridge do
     Process.send_after(self(), {:heartbeat}, duration)
   end
 
-  def encode(request, schema) do
+  def encode({content_type, content} = request, schema) do
     Message.format(request)
+    |> Message.envelope(content_type)
     |> Eflatbuffers.write!(schema)
   end
 
