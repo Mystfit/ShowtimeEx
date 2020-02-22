@@ -1,5 +1,7 @@
 defmodule ShowtimeEx.StageSocket do
   use WebSockex
+  use EventBus.EventSource
+  alias EventBus.EventSource, as: EventSource
 
   def start_link(url) do
     WebSockex.start_link(url, __MODULE__, %{})
@@ -10,7 +12,10 @@ defmodule ShowtimeEx.StageSocket do
   end
 
   def handle_frame({:binary, msg}, state) do
-    ShowtimeEx.Bridge.sock_receive(msg)
+    params = %{topic: :stage_msg_recv}
+    EventSource.notify(params) do 
+      %{msg_binary: msg}
+    end
     {:ok, state}
   end
 

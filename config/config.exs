@@ -8,8 +8,10 @@ config :showtime_ex,
 
 config :event_bus,
   topics: [
-    :stage_msg_recv,
-    :another_event_occurred
-  ]
+    :stage_msg_recv
+  ],
+  ttl: 30_000_000,
+  time_unit: :microsecond,
+  id_generator: EventBus.Util.Base62
 
 # import_config "#{Mix.env()}.exs"

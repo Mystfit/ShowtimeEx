@@ -8,7 +8,7 @@ defmodule ShowtimeEx.Application do
     # import Supervisor.Spec
 
     children = [
-      {ShowtimeEx.Bridge, []}
+      {ShowtimeEx.Bridge, []},
     ]
 
     opts = [strategy: :one_for_one, name: ShowtimeEx.Supervisor]

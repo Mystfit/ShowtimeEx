@@ -35,7 +35,7 @@ defmodule ShowtimeEx.Message do
     %{
       content: content,
       content_type: Atom.to_string(type),
-      id: 0
+      id: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,27]
     }
   end
 end

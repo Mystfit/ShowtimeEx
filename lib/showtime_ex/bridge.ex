@@ -6,13 +6,14 @@ defmodule ShowtimeEx.Bridge do
   alias ShowtimeEx.Message, as: Message
 
   def init(_state) do
-    Process.send_after(self(), :load_schemas, 0)
+    EventBus.subscribe({__MODULE__, ["stage_msg_recv$"]})
 
     {:ok,
      %{
        stage_socket: nil,
        schema: nil
-     }}
+      }, {:continue, :load_schemas}
+    }
   end
 
   def start_link(state) do
@@ -20,31 +21,32 @@ defmodule ShowtimeEx.Bridge do
   end
 
   def join(address, name) do
-    GenServer.cast(__MODULE__, {:ClientJoinRequest, %{address: address, name: name}})
+    GenServer.cast(__MODULE__, {:send, {:ClientJoinRequest, %{address: address, name: name}}})
   end
 
   def leave(performer_path, reason = "QUIT") do
     GenServer.cast(
       __MODULE__,
-      {:ClientLeaveRequest, %{performer_path: performer_path, reason: reason}}
+      {:send, :ClientLeaveRequest, %{performer_path: performer_path, reason: reason}}
     )
   end
 
   def add(entity) do
-    GenServer.cast(__MODULE__, {:EntityCreateRequest, %{entity: entity}})
+    GenServer.cast(__MODULE__, {:send, {:EntityCreateRequest, %{entity: entity}}})
   end
 
   def remove(entity_path) do
-    GenServer.cast(__MODULE__, {:EntityDestroyRequest, %{entity_path: entity_path}})
+    GenServer.cast(__MODULE__, {:send, {:EntityDestroyRequest, %{entity_path: entity_path}}})
   end
 
-  def sock_receive(msg) do
-    GenServer.cast(__MODULE__, {:sock_receive, msg})
+  def process({topic, id} = event_shadow) do
+    GenServer.cast(__MODULE__, event_shadow)
+    :ok
   end
 
   # ----------------------------
 
-  def handle_info(:load_schemas, state) do
+  def handle_continue(:load_schemas, state) do
     {:ok, schema} =
       Application.fetch_env!(:showtime_ex, :stage_schema_files)
       |> Message.load_schema()
@@ -61,14 +63,7 @@ defmodule ShowtimeEx.Bridge do
     {:noreply, state}
   end
 
-  def handle_cast({:sock_receive, msg}, state) do
-    Eflatbuffers.read!(msg, state[:schema])
-    |> IO.inspect()
-
-    {:noreply, state}
-  end
-
-  def handle_cast({:ClientJoinRequest, %{address: address, name: name}} = request, state) do
+  def handle_cast({:send, {:ClientJoinRequest, %{address: address, name: name}} = request}, state) do
     state = ensure_socket_connected(address, state)
 
     {:ok, result} =
@@ -78,11 +73,21 @@ defmodule ShowtimeEx.Bridge do
     {:noreply, state}
   end
 
-  def handle_cast({content_type, content} = request, state) when is_atom(content_type) do
+  def handle_cast({:send, {content_type, content} = request}, state) when is_atom(content_type) do
     {:ok, result} =
       encode(request, state[:schema])
       |> sock_send(state[:stage_socket])
 
+    {:noreply, state}
+  end
+
+  def handle_cast({:stage_msg_recv, id} = event_shadow, state) do
+    message = EventBus.fetch_event(event_shadow)
+    |> get_in([Access.key(:data), :msg_binary])
+    |> Eflatbuffers.read!(state[:schema])
+    # |> IO.inspect()
+
+    EventBus.mark_as_completed({__MODULE__, event_shadow})
     {:noreply, state}
   end
 
